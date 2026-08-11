@@ -78,6 +78,17 @@ def get_all_employees() -> list[dict]:
 	)
 
 
+@frappe.whitelist()
+def get_reports_to_employee_name(employee: str) -> str:
+	reports_to = frappe.db.get_value(
+		"Employee", {"user_id": frappe.session.user, "status": "Active"}, "reports_to"
+	)
+	if not reports_to or reports_to != employee:
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	return frappe.db.get_value("Employee", employee, "employee_name") or ""
+
+
 def get_current_employee() -> str:
 	employee = get_current_employee_info().get("name")
 	if not employee:
@@ -274,6 +285,8 @@ def get_filters(
 
 @frappe.whitelist()
 def get_shift_request_approvers(employee: str) -> str | list[str]:
+	frappe.has_permission("Employee", "read", employee, throw=True)
+
 	shift_request_approver, department = frappe.get_cached_value(
 		"Employee",
 		employee,
@@ -282,6 +295,7 @@ def get_shift_request_approvers(employee: str) -> str | list[str]:
 
 	department_approvers = []
 	if department:
+		frappe.has_permission("Department", "read", department, throw=True)
 		department_approvers = get_department_approvers(department, "shift_request_approver")
 		if not shift_request_approver:
 			shift_request_approver = frappe.db.get_value(
@@ -408,6 +422,8 @@ def get_holidays_for_employee(employee: str) -> list[dict]:
 	if not holiday_list:
 		return []
 
+	frappe.has_permission("Holiday List", "read", holiday_list, throw=True)
+
 	Holiday = frappe.qb.DocType("Holiday")
 	holidays = (
 		frappe.qb.from_(Holiday)
@@ -424,6 +440,7 @@ def get_holidays_for_employee(employee: str) -> list[dict]:
 
 @frappe.whitelist()
 def get_leave_approval_details(employee: str) -> dict:
+	frappe.has_permission("Employee", "read", employee, throw=True)
 	leave_approver, department = frappe.get_cached_value(
 		"Employee",
 		employee,
@@ -431,6 +448,7 @@ def get_leave_approval_details(employee: str) -> dict:
 	)
 
 	if not leave_approver and department:
+		frappe.has_permission("Department", "read", department, throw=True)
 		leave_approver = frappe.db.get_value(
 			"Department Approver",
 			{"parent": department, "parentfield": "leave_approvers", "idx": 1},
@@ -487,6 +505,7 @@ def get_leave_types(employee: str, date: str) -> list:
 
 	date = date or getdate()
 
+	# Get leave details validate leave access internally
 	leave_details = get_leave_details(employee, date)
 	leave_types = list(leave_details["leave_allocation"].keys()) + leave_details["lwps"]
 
@@ -600,6 +619,7 @@ def get_expense_claim_types() -> list[dict]:
 
 @frappe.whitelist()
 def get_expense_approval_details(employee: str) -> dict:
+	frappe.has_permission("Employee", "read", employee, throw=True)
 	expense_approver, department = frappe.get_cached_value(
 		"Employee",
 		employee,
@@ -607,6 +627,7 @@ def get_expense_approval_details(employee: str) -> dict:
 	)
 
 	if not expense_approver and department:
+		frappe.has_permission("Department", "read", department, throw=True)
 		expense_approver = frappe.db.get_value(
 			"Department Approver",
 			{"parent": department, "parentfield": "expense_approvers", "idx": 1},
@@ -650,7 +671,7 @@ def get_employee_advance_balance() -> list[dict]:
 			& (Advance.paid_amount)
 			& (Advance.employee == employee)
 			# don't need claimed & returned advances, only partly or completely paid ones
-			& (Advance.status.isin(["Paid", "Unpaid"]))
+			& (Advance.status.isin(["Paid", "Partially Paid", "Unpaid"]))
 		)
 		.orderby(Advance.posting_date, order=Order.desc)
 	).run(as_dict=True)
@@ -691,6 +712,7 @@ def get_currency_symbols() -> dict:
 
 @frappe.whitelist()
 def get_company_cost_center_and_expense_account(company: str) -> dict:
+	frappe.has_permission("Company", "read", company, throw=True)
 	return frappe.db.get_value(
 		"Company", company, ["cost_center", "default_expense_claim_payable_account"], as_dict=True
 	)
@@ -724,7 +746,9 @@ def get_attachments(dt: str, dn: str):
 
 
 @frappe.whitelist()
-def upload_base64_file(content, filename, dt=None, dn=None, fieldname=None):
+def upload_base64_file(
+	content: str, filename: str, dt: str | None = None, dn: str | None = None, fieldname: str | None = None
+):
 	import base64
 	import io
 	from mimetypes import guess_type
@@ -749,6 +773,8 @@ def upload_base64_file(content, filename, dt=None, dn=None, fieldname=None):
 	else:
 		file_content = decoded_content
 
+	frappe.has_permission(dt, "write", dn, throw=True)
+
 	return frappe.get_doc(
 		{
 			"doctype": "File",
@@ -765,6 +791,11 @@ def upload_base64_file(content, filename, dt=None, dn=None, fieldname=None):
 
 @frappe.whitelist()
 def delete_attachment(filename: str):
+	attached_to_doctype, attached_to_name = frappe.db.get_value(
+		"File", filename, ["attached_to_doctype", "attached_to_name"]
+	)
+	if attached_to_doctype and attached_to_name:
+		frappe.has_permission(attached_to_doctype, "write", attached_to_name, throw=True)
 	frappe.delete_doc("File", filename)
 
 

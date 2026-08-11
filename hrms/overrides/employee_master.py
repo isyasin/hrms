@@ -4,6 +4,8 @@
 import frappe
 from frappe import _
 from frappe.model.naming import set_name_by_naming_series
+from frappe.query_builder import Interval
+from frappe.query_builder.functions import Count, CurDate, UnixTimestamp
 from frappe.utils import add_years, cint, get_link_to_form, getdate
 
 from erpnext.setup.doctype.employee.employee import Employee
@@ -118,25 +120,37 @@ def update_employee_transfer(doc, method=None):
 
 
 @frappe.whitelist()
-def get_timeline_data(doctype, name):
+def get_timeline_data(doctype: str, name: str) -> dict:
 	"""Return timeline for attendance"""
 	from frappe.desk.notifications import get_open_count
 
 	out = {}
 
+	frappe.has_permission(doctype, "read", name, throw=True)
+	frappe.has_permission("Attendance", "read", throw=True)
+
 	open_count = get_open_count(doctype, name)
 	out["count"] = open_count["count"]
 
+	from frappe.query_builder.terms import Function
+
+	Attendance = frappe.qb.DocType("Attendance")
+
 	timeline_data = dict(
-		frappe.db.sql(
-			"""
-			select unix_timestamp(attendance_date), count(*)
-			from `tabAttendance` where employee=%s
-			and attendance_date > date_sub(curdate(), interval 1 year)
-			and status in ('Present', 'Half Day')
-			group by attendance_date""",
-			name,
-		)
+		(
+			frappe.qb.from_(Attendance)
+			.select(
+				Function("unix_timestamp", Attendance.attendance_date),
+				Count("*"),
+			)
+			.where(
+				(Attendance.employee == name)
+				& (Attendance.docstatus == 1)
+				& (Attendance.attendance_date > (CurDate() - Interval(years=1)))
+				& (Attendance.status.isin(["Present", "Half Day"]))
+			)
+			.groupby(Attendance.attendance_date)
+		).run()
 	)
 
 	out["timeline_data"] = timeline_data
@@ -144,7 +158,7 @@ def get_timeline_data(doctype, name):
 
 
 @frappe.whitelist()
-def get_retirement_date(date_of_birth=None):
+def get_retirement_date(date_of_birth: str | None = None):
 	if date_of_birth:
 		try:
 			retirement_age = cint(frappe.db.get_single_value("HR Settings", "retirement_age") or 60)

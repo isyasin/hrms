@@ -4,6 +4,7 @@
 
 import frappe
 from frappe import _
+from frappe.model.document import Document
 from frappe.model.mapper import get_mapped_doc
 
 from hrms.controllers.employee_boarding_controller import EmployeeBoardingController
@@ -60,6 +61,7 @@ class EmployeeOnboarding(EmployeeBoardingController):
 
 	@frappe.whitelist()
 	def mark_onboarding_as_completed(self):
+		self.check_permission("write")
 		for activity in self.activities:
 			frappe.db.set_value("Task", activity.task, "status", "Completed")
 		frappe.db.set_value("Project", self.project, "status", "Completed")
@@ -68,7 +70,7 @@ class EmployeeOnboarding(EmployeeBoardingController):
 
 
 @frappe.whitelist()
-def make_employee(source_name, target_doc=None):
+def make_employee(source_name: str, target_doc: str | Document | None = None) -> Document:
 	doc = frappe.get_doc("Employee Onboarding", source_name)
 	doc.validate_employee_creation()
 
